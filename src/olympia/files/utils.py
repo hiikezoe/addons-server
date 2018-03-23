@@ -832,8 +832,8 @@ def parse_xpi(xpi, addon=None, minimal=False,
     if minimal:
         return xpi_info
     return check_xpi_info(
-        xpi_info, addon, xpi,
-        needs_validate_translations=needs_validate_translations)
+      xpi_info, addon, xpi,
+      needs_validate_translations=needs_validate_translations)
 
 
 def validate_translations(translations):
