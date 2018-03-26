@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import datetime
 import os
+import zipfile
 
 import waffle
 
 import django.dispatch
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.storage import default_storage as storage
 from django.db import models
@@ -29,7 +31,7 @@ from olympia.amo.templatetags.jinja_helpers import (
     id_to_path, user_media_path, user_media_url)
 from olympia.amo.urlresolvers import reverse
 from olympia.amo.utils import (
-    sorted_groupby, utc_millesecs_from_epoch, walkfiles)
+    resize_image, sorted_groupby, utc_millesecs_from_epoch, walkfiles)
 from olympia.applications.models import AppVersion
 from olympia.constants.licenses import LICENSES_BY_BUILTIN
 from olympia.files import utils
@@ -38,7 +40,7 @@ from olympia.translations.fields import (
     LinkifiedField, PurifiedField, TranslatedField, save_signal)
 
 from .compare import version_dict, version_int
-
+from io import BytesIO
 
 log = olympia.core.logger.getLogger('z.versions')
 
@@ -154,7 +156,7 @@ class Version(OnChangeMixin, ModelBase):
         if parsed_data is None:
             parsed_data = utils.parse_addon(
                 upload, addon,
-                needs_validate_translations=needs_import_metadata)
+                needs_validate_metadata=needs_import_metadata)
 
         # Import localized names and summaries
         if needs_import_metadata:
@@ -193,6 +195,11 @@ class Version(OnChangeMixin, ModelBase):
             compatible_apps[app.appdata] = ApplicationsVersions(
                 version=version, min=app.min, max=app.max, application=app.id)
             compatible_apps[app.appdata].save()
+
+        if needs_import_metadata:
+            icons = parsed_data.get('icons')
+            if icons:
+                cls._extract_icons(icons, upload.path, addon)
 
         # See #2828: sometimes when we generate the filename(s) below, in
         # File.from_upload(), cache-machine is confused and has trouble
@@ -283,6 +290,60 @@ class Version(OnChangeMixin, ModelBase):
 
         # Platforms are safe as is
         return platforms
+
+    @classmethod
+    def _extract_icons(cls, icons, upload_path, addon):
+        dirname = addon.get_icon_dir()
+        icons_for_all_sizes = dict(
+            dict.fromkeys(amo.ADDON_ICON_SIZES),
+            **dict((int(k), v) for (k, v) in icons.items()))
+
+        nearest_icon = None
+        icons_length = len(icons_for_all_sizes)
+        icons_list = sorted(icons_for_all_sizes.items())
+
+        # Fill out missing icon path with the nearest and largest icon.
+        for (size, path) in reversed(sorted(icons_list)):
+            if not path:
+                if nearest_icon is None:
+                    for i in range(icons_length - 1):
+                        if icons_list[i][1] is None:
+                            continue
+                        nearest_icon = icons_list[i][1]
+                if nearest_icon is None:
+                    # This shouldn't happen since this function should be
+                    # called after addons-linter passed that means if there
+                    # is an icon entry, there should be a correspoinding valid
+                    # icon path.
+                    continue
+                path = nearest_icon
+
+            # We don't import svg icons for now.
+            if (not path.endswith('.png') and
+                not path.endswith('.jpg')):
+                continue
+
+            if path:
+                nearest_icon = path
+            if size not in amo.ADDON_ICON_SIZES:
+                continue
+            icons_for_all_sizes[size] = nearest_icon
+
+        with zipfile.ZipFile(upload_path, 'r') as source:
+            for (size, path) in icons_for_all_sizes.items():
+                if not path:
+                    continue
+                # We don't import svg icons for now.
+                if ((not path.endswith('.png') and
+                     not path.endswith('.jpg')) or
+                    size not in amo.ADDON_ICON_SIZES):
+                    continue
+
+                filename = '%s-%s.png' % (addon.id, size)
+                filepath = os.path.join(dirname, filename)
+
+                icon_data = source.read(path)
+                resize_image(BytesIO(icon_data), filepath, (size, size))
 
     @property
     def path_prefix(self):

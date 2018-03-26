@@ -943,6 +943,20 @@ class TestExtensionVersionFromUpload(TestVersionFromUpload):
         assert translations['en-US'] == 'Localized summary in en-US'
         assert translations['de'] == 'Initial summary in de'
 
+    def test_icons_in_new_version(self):
+        self.addon.update(guid='notify-link-clicks-i18n@notzilla.org')
+        self.upload = self.get_upload('notify-link-clicks-i18n.xpi')
+        version = Version.from_upload(self.upload, self.addon, [self.platform],
+                                      amo.RELEASE_CHANNEL_LISTED,
+                                      needs_import_metadata=True)
+
+        icon_dir = os.path.join(
+            self.addon.get_icon_dir(), '%s' % self.addon.id);
+        # notify-link-clicks-i18n.xpi has a 48x48 size icon.
+        icon_path = '%s-%s.png' % (icon_dir, '48')
+
+        assert storage.exists(icon_path)
+
 
 class TestSearchVersionFromUpload(TestVersionFromUpload):
     filename = 'search.xml'

@@ -15,6 +15,7 @@ import flufl.lock
 import lxml
 import mock
 import pytest
+from waffle.testutils import override_switch
 
 from defusedxml.common import EntitiesForbidden, NotSupportedError
 
@@ -195,6 +196,90 @@ class TestManifestJSONExtractor(TestCase):
         assert (
             self.parse({'description': 'An addon.'})['summary'] == 'An addon.')
 
+    def test_icons(self):
+        """Use icons for the icons."""
+        icon_data = {
+            'icons': {
+                '48': 'icon.png',
+                '96': 'icon@2x.png'
+            }
+        }
+        assert self.parse(icon_data)['icons'] == {
+            '48': 'icon.png',
+            '96': 'icon@2x.png'
+        }
+
+    @override_switch('allow-static-theme-uploads', active=True)
+    def test_valid_icon_path(self):
+        fixture = (
+            'src/olympia/files/fixtures/files/webextension-with-48x48icon.xpi')
+        xpi = os.path.join(settings.ROOT, fixture)
+
+        xpi_info = utils.parse_xpi(open(xpi), needs_validate_metadata=True)
+
+        assert xpi_info['icons'] == { '48': '48x48.png' }
+
+    def test_invalid_icon_size(self):
+        icon_data = {
+            'icons': {
+                'x48': 'icon.png',
+            }
+        }
+
+        manifest = self.parse(icon_data)
+
+        with pytest.raises(forms.ValidationError) as exc:
+            utils.check_xpi_info(manifest, needs_validate_metadata=True)
+
+        assert (exc.value.message == 'Icon size should be an integer.')
+
+    @override_switch('allow-static-theme-uploads', active=True)
+    @mock.patch('zipfile.ZipFile.namelist')
+    def test_invalid_icon_path(self, namelist):
+        icon_data = {
+            'icons': {
+                '48': 'invalid.png',
+            }
+        }
+        namelist.return_value = [ 'valid.png' ]
+
+        manifest = self.parse(icon_data)
+
+        fixture = 'src/olympia/files/fixtures/files/webextension.xpi'
+
+        with pytest.raises(forms.ValidationError) as exc:
+            utils.check_xpi_info(manifest, xpi_file=fixture,
+                                 needs_validate_metadata=True)
+
+        assert (exc.value.message == 'invalid.png should be in the package.')
+
+    @override_switch('allow-static-theme-uploads', active=True)
+    @mock.patch('zipfile.ZipFile.getinfo')
+    @mock.patch('zipfile.ZipFile.namelist')
+    def test_large_icon(self, namelist, getinfo):
+        icon_data = {
+            'icons': {
+                '48': 'valid.png',
+            }
+        }
+        namelist.return_value = [ 'valid.png' ]
+        class MockZipInfo(object):
+            file_size = settings.MAX_ICON_UPLOAD_SIZE + 1
+
+        getinfo.return_value = MockZipInfo()
+
+        manifest = self.parse(icon_data)
+
+        fixture = 'src/olympia/files/fixtures/files/webextension.xpi'
+
+        with pytest.raises(forms.ValidationError) as exc:
+            utils.check_xpi_info(manifest, xpi_file=fixture,
+                                 needs_validate_metadata=True)
+
+        max_size = settings.MAX_ICON_UPLOAD_SIZE / 1024 / 1024 - 1
+        assert (exc.value.message ==
+                    'valid.png should be smaller than %dMB.' % max_size)
+
     def test_invalid_strict_min_version(self):
         data = {
             'applications': {
@@ -344,7 +429,7 @@ class TestManifestJSONExtractor(TestCase):
                 'have fewer than 50 characters\.\'')
             with pytest.raises(forms.ValidationError, match=expected_match):
                 utils.parse_xpi(file_obj.file_path,
-                                needs_validate_translations=True)
+                                needs_validate_metadata=True)
 
     @mock.patch('olympia.addons.models.resolve_i18n_message')
     def test_long_localized_summary(self, resolve_message):
@@ -366,7 +451,7 @@ class TestManifestJSONExtractor(TestCase):
                 'have fewer than 500 characters\.\'')
             with pytest.raises(forms.ValidationError, match=expected_match):
                 utils.parse_xpi(file_obj.file_path,
-                                needs_validate_translations=True)
+                                needs_validate_metadata=True)
 
     @mock.patch('olympia.addons.models.resolve_i18n_message')
     def test_mozilla_trademark_disallowed(self, resolve_message):

@@ -50,6 +50,7 @@ class ParseError(forms.ValidationError):
 
 VERSION_RE = re.compile('^[-+*.\w]{,32}$')
 SIGNED_RE = re.compile('^META\-INF/(\w+)\.(rsa|sf)$')
+ICONSIZE_RE = re.compile('^[1-9]\d*$')
 
 # This is essentially what Firefox matches
 # (see toolkit/components/extensions/ExtensionUtils.jsm)
@@ -492,6 +493,7 @@ class ManifestJSONExtractor(object):
                 # webextensions don't.
                 'strict_compatibility': data['type'] == amo.ADDON_LPAPP,
                 'default_locale': self.get('default_locale'),
+                'icons': self.get('icons'),
             })
             if self.type == amo.ADDON_EXTENSION:
                 # Only extensions have permissions and content scripts
@@ -797,7 +799,7 @@ def extract_xpi(xpi, path, expand=False, verify=True):
 
 
 def parse_xpi(xpi, addon=None, minimal=False,
-              needs_validate_translations=False):
+              needs_validate_metadata=False):
     """Extract and parse an XPI. Returns a dict with various properties
     describing the xpi.
 
@@ -808,7 +810,7 @@ def parse_xpi(xpi, addon=None, minimal=False,
     only the minimal set of properties needed to decide what to do with the
     add-on: guid, version and is_webextension.
 
-    If needs_validate_translations is True, translated names and summaries are
+    If needs_validate_metadata is True, translated names and summaries are
     validated to conform AMO restrictions.
     """
     try:
@@ -833,7 +835,7 @@ def parse_xpi(xpi, addon=None, minimal=False,
         return xpi_info
     return check_xpi_info(
       xpi_info, addon, xpi,
-      needs_validate_translations=needs_validate_translations)
+      needs_validate_metadata=needs_validate_metadata)
 
 
 def validate_translations(translations):
@@ -854,7 +856,7 @@ def validate_translations(translations):
 
 
 def check_xpi_info(xpi_info, addon=None, xpi_file=None,
-                   needs_validate_translations=False):
+                   needs_validate_metadata=False):
     from olympia.addons.models import Addon, DeniedGuid
     guid = xpi_info['guid']
     is_webextension = xpi_info.get('is_webextension', False)
@@ -898,6 +900,13 @@ def check_xpi_info(xpi_info, addon=None, xpi_file=None,
             ugettext('Version numbers should only contain letters, numbers, '
                      'and these punctuation characters: +*.-_.'))
 
+    icons = xpi_info.get('icons')
+    if icons:
+        for (icon_size, icon_path) in icons.items():
+            if not ICONSIZE_RE.match(icon_size):
+                raise forms.ValidationError(ugettext(
+                    'Icon size should be an integer.'))
+
     if is_webextension and xpi_info.get('type') == amo.ADDON_STATICTHEME:
         if not waffle.switch_is_active('allow-static-theme-uploads'):
             raise forms.ValidationError(ugettext(
@@ -910,14 +919,31 @@ def check_xpi_info(xpi_info, addon=None, xpi_file=None,
             xpi_info.copy(), xpi_file)
         verify_mozilla_trademark(translations['name'], core.get_user())
 
-        if needs_validate_translations:
+        if needs_validate_metadata:
             validate_translations(translations)
+            if icons:
+                validate_icons(xpi_file, icons.values())
 
     return xpi_info
 
 
+def validate_icons(xpi_file, icon_paths):
+    with zipfile.ZipFile(get_filepath(xpi_file), 'r') as source:
+        file_list = source.namelist()
+        for icon_path in icon_paths:
+            if icon_path not in file_list:
+                msg = ugettext('%s should be in the package.')
+                raise forms.ValidationError(msg % icon_path)
+
+            zipinfo = source.getinfo(icon_path)
+            if zipinfo.file_size > settings.MAX_ICON_UPLOAD_SIZE:
+                size_in_mb = settings.MAX_ICON_UPLOAD_SIZE / 1024 / 1024 - 1
+                msg = ugettext('%s should be smaller than %dMB.')
+                raise forms.ValidationError(msg % (icon_path, size_in_mb))
+
+
 def parse_addon(pkg, addon=None, minimal=False,
-                needs_validate_translations=False):
+                needs_validate_metadata=False):
     """
     Extract and parse a file path, UploadedFile or FileUpload. Returns a dict
     with various properties describing the add-on.
@@ -930,7 +956,7 @@ def parse_addon(pkg, addon=None, minimal=False,
     add-on (the exact set depends on the add-on type, but it should always
     contain at least guid, type, version and is_webextension.
 
-    If needs_validate_translations is True, translated names and summaries are
+    If needs_validate_metadata is True, translated names and summaries are
     validated to conform AMO restrictions.
     """
     name = getattr(pkg, 'name', pkg)
@@ -939,7 +965,7 @@ def parse_addon(pkg, addon=None, minimal=False,
     else:
         parsed = parse_xpi(
             pkg, addon, minimal=minimal,
-            needs_validate_translations=needs_validate_translations)
+            needs_validate_metadata=needs_validate_metadata)
 
     if not minimal and addon and addon.type != parsed['type']:
         msg = ugettext(
