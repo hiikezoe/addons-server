@@ -133,29 +133,28 @@ def create_persona_preview_images(src, full_dst, **kw):
     preview, full = amo.PERSONA_IMAGE_SIZES['header']
     preview_w, preview_h = preview
     orig_w, orig_h = full
-    with storage.open(src) as fp:
-        i_orig = i = Image.open(fp)
+    i_orig = i = Image.open(src)
 
-        # Crop image from the right.
-        i = i.crop((orig_w - (preview_w * 2), 0, orig_w, orig_h))
+    # Crop image from the right.
+    i = i.crop((orig_w - (preview_w * 2), 0, orig_w, orig_h))
 
-        # Resize preview.
-        i = i.resize(preview, Image.ANTIALIAS)
-        i.load()
-        with storage.open(full_dst[0], 'wb') as fp:
-            i.save(fp, 'png')
+    # Resize preview.
+    i = i.resize(preview, Image.ANTIALIAS)
+    i.load()
+    with storage.open(full_dst[0], 'wb') as fp:
+        i.save(fp, 'png')
 
-        _, icon_size = amo.PERSONA_IMAGE_SIZES['icon']
-        icon_w, icon_h = icon_size
+    _, icon_size = amo.PERSONA_IMAGE_SIZES['icon']
+    icon_w, icon_h = icon_size
 
-        # Resize icon.
-        i = i_orig
-        i.load()
-        i = i.crop((orig_w - (preview_h * 2), 0, orig_w, orig_h))
-        i = i.resize(icon_size, Image.ANTIALIAS)
-        i.load()
-        with storage.open(full_dst[1], 'wb') as fp:
-            i.save(fp, 'png')
+    # Resize icon.
+    i = i_orig
+    i.load()
+    i = i.crop((orig_w - (preview_h * 2), 0, orig_w, orig_h))
+    i = i.resize(icon_size, Image.ANTIALIAS)
+    i.load()
+    with storage.open(full_dst[1], 'wb') as fp:
+        i.save(fp, 'png')
     pngcrush_image(full_dst[0])
     pngcrush_image(full_dst[1])
     return True
@@ -169,10 +168,9 @@ def save_persona_image(src, full_dst, **kw):
     if not img.is_image():
         log.error('Not an image: %s' % src, exc_info=True)
         return
-    with storage.open(src, 'rb') as fp:
-        i = Image.open(fp)
-        with storage.open(full_dst, 'wb') as fp:
-            i.save(fp, 'png')
+    i = Image.open(src)
+    with storage.open(full_dst, 'wb') as fp:
+        i.save(fp, 'png')
     pngcrush_image(full_dst)
     return True
 

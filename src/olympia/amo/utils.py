@@ -534,12 +534,11 @@ def resize_image(source, destination, size=None):
         raise Exception(
             "source and destination can't be the same: %s" % source)
 
-    with storage.open(source, 'rb') as fp:
-        im = Image.open(fp)
-        im = im.convert('RGBA')
-        original_size = im.size
-        if size:
-            im = processors.scale_and_crop(im, size)
+    im = Image.open(source)
+    im = im.convert('RGBA')
+    original_size = im.size
+    if size:
+        im = processors.scale_and_crop(im, size)
     with storage.open(destination, 'wb') as fp:
         im.save(fp, 'png')
     pngcrush_image(destination)

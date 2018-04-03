@@ -1039,8 +1039,7 @@ def ajax_upload_image(request, upload_type, addon_id=None):
         if check.is_image() and is_persona:
             persona, img_type = upload_type.split('_')  # 'header' or 'footer'
             expected_size = amo.PERSONA_IMAGE_SIZES.get(img_type)[1]
-            with storage.open(loc, 'rb') as fp:
-                actual_size = Image.open(fp).size
+            actual_size = Image.open(loc).size
             if actual_size != expected_size:
                 # L10n: {0} is an image width (in pixels), {1} is a height.
                 errors.append(ugettext('Image must be exactly {0} pixels '
